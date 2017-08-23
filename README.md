@@ -5,7 +5,7 @@ Download github repo: https://github.com/AutonomyLab/ardrone_autonomy.git
 
 Other requirements:
 
-ROS
+ROS Indigo/Kinetic
 
 Open CV 3.0 compiled with extra modules (for object trackers)
 
