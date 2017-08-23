@@ -16,6 +16,7 @@ from imutils.object_detection import non_max_suppression
 import imutils
 import numpy as np
 
+#initializes ros node and publishers
 rospy.init_node('takeoff', anonymous=True)
 pubT = rospy.Publisher("ardrone/takeoff", Empty, queue_size=1)
 commandDrone= rospy.Publisher('/cmd_vel', Twist, queue_size=1)
@@ -23,6 +24,7 @@ pubL = rospy.Publisher("ardrone/land", Empty, queue_size=1)
 rate = rospy.Rate(10) # 10hz
 
 def control():
+	#commands drone to takeoff, go up for 0.5 seconds then stop
 	SendCommand(0,0,0,0)
 	takeoff()
 	rospy.sleep(5)
@@ -33,7 +35,6 @@ def control():
 	z=True
 	time=0
 	while(z==True):
-		#frame=saveImg()
 		xCoord,yCoord, width, length, f= findFace()
 		print "Face found. Enabling tracking algorithm.."
 		track(xCoord,yCoord, width, length, f)
@@ -52,10 +53,14 @@ def findFace():
 		xC=0
 		yC=0
 		width=0
+		#loads pretrained classifier
 		face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
+		#gets image from drone
 		msg=rospy.wait_for_message("/ardrone/image_raw", imageX)
+		#converts raw image to numpy array
 		img = ros_numpy.numpify(msg)
 		gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+		#detects faces in frame using classifier
 		faces = face_cascade.detectMultiScale(gray, 1.2, 5)
 		for (x,y,w,h) in faces:
 			xC=x
@@ -63,7 +68,7 @@ def findFace():
 			width=w
 		
 		if (xC==0):
-			print "hello"
+			print "Face not found..."
 		else:
 			print "Face found..."
 			param=False
@@ -71,19 +76,20 @@ def findFace():
 	return xC, yC, width, width, img
 
 def track(x,y,w,h,f):
-    #msg=rospy.wait_for_message("/ardrone/image_raw", imageX)
-    #f = ros_numpy.numpify(msg)
     trackerVar=0
     varia=str(trackerVar)
+    #creates tracker
     varia = cv2.Tracker_create("KCF")
     x=x
     y=y
+    #creates bounding box
     xC=(int) (x-1.5*w)
     yC=(int) (y-0.75*w)
     height=h*5
     width= (int) (w*3.5)
     c,r,w,h=xC,yC,width,height
     bbox = (c,r,w,h)
+    #intialized tracker with the created bounding box
     ok = varia.init(f, bbox)
     ratioX,ratioY= initDist(f, width,height)
     num=0#once we get to looking for distance every 5 frames
@@ -95,13 +101,15 @@ def track(x,y,w,h,f):
         msg=rospy.wait_for_message("/ardrone/image_raw", imageX)
         frame = ros_numpy.numpify(msg)
         ok=True
+	#updates position of bounding box using the KCF tracker
         ok, bbox = varia.update(frame)
         if ok:
             p1 = (int(bbox[0]), int(bbox[1]))
             p2 = (int(bbox[0] + bbox[2]), int(bbox[1] + bbox[3]))
+	    #draws bounding  box on the current frame
             cv2.rectangle(frame, p1, p2, (0,0,255))
         if(num==3):
-            #position= findDistance(frame, p2[0]-p1[0],p2[1]-p1[1], ratioX, ratioY)
+            #check initDistance for descr of pedestrian detector
             position=0
             hog = cv2.HOGDescriptor()
             hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
@@ -117,17 +125,9 @@ def track(x,y,w,h,f):
             for (xA, yA, xB, yB) in pick:
                 par+=1
                 cv2.rectangle(image, (xA, yA), (xB, yB), (0, 255, 0), 2)
-    #cv2.imshow("Before NMS", orig)
-    #cv2.imshow("After NMS", image)
             if(par>0):
-                #print "old x:", ratioX
-                #print "new x:", (float)(xB-xA)/width
-                #print "old y:", ratioY
-                #print "new y:", (float)(yB-yA)/height
-                #if ((float)(xB-xA)/width>ratioX+0.05 and (float)(yB-yA)/height>ratioY+0.05):
+		#checks if bounding box is close enough using pedestrian detector
                 if(abs(((xB+xA)/2)-(p1[0]+p2[0])/2)>120 or abs(((yB+yA)/2)-((p1[1]+p2[1])/2))>40):
-                 #print "x:", abs(((xB+xA)/2)-(p1[0]+p2[0])/2)
-                 #print "y:", abs(((yB+yA)/2)-((p1[1]+p2[1])/2))
                  cv2.circle(image,(((xB+xA)/2),((yB+yA)/2)),2,(0,0,255),3)
                  cv2.circle(image,(p1[0],p1[1]),2,(0,255,0),3)
                  print "fixing bbox"
@@ -135,12 +135,14 @@ def track(x,y,w,h,f):
                  yC=yA
                  #height=h*5
                  #width= (int) (w*3.5)
+		 #creates new bounding box and creates/initializes a new tracker
                  c,r,w,h=xC+width/2,yC+height/2,width,height
                  bbox = (c,r,w,h)
                  trackerVar+=1
                  varia=str(trackerVar)
                  varia = cv2.Tracker_create("KCF")
                  ok = varia.init(frame, bbox)
+		#sets whether it should be moving forward or backward or neither
                 if ((float)(yB-yA)/ratioY>1.3):
                     position=2
                     print (float)(yB-yA)/ratioY
@@ -150,6 +152,8 @@ def track(x,y,w,h,f):
                     position=0
             else:
                 print "couldnt find person"
+	    #logic for setting commands for drone- could be accomplished much easier with global variables
+	    # but not sure if possible with current framework
                 if(turn==0):
                     SendCommand(0,0,0,0)
                     rospy.sleep(0.3)
@@ -202,9 +206,11 @@ def track(x,y,w,h,f):
             num=0
         else:
             num+=1
+	#displays current frame with bounding box drawn on
         cv2.imshow("Tracking", frame)
+	#finds angle of center of bbox
         angle= findAngle((p1[0]+p2[0])/2)
-        #update distance
+        #checks angle and logic for setting drone commands
         if(angle<=5 and angle>=-5 and var>0):
             if(forward==0):
                 SendCommand(0,0,0,0)
@@ -238,6 +244,7 @@ def track(x,y,w,h,f):
         if k == 27 : break
 
 def findAngle(xCoord):
+	#since field of vision is around 70 degrees for AR Drone 2.0
 	return round((xCoord-320)*35/320)
 
 def initDist(frame,width,height):
@@ -245,15 +252,20 @@ def initDist(frame,width,height):
     x=True
     par=0
     while (x):
+     #creates
      hog = cv2.HOGDescriptor()
+     #loads pretrained linear svm
      hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+     #resizes image for faster processing
      image = imutils.resize(frame, width=min(400, frame.shape[1]))
      orig = image.copy()
+     #detects person in image
      (rects, weights) = hog.detectMultiScale(image, winStride=(4, 4),
         padding=(8, 8), scale=1.05)
      for (x, y, w, h) in rects:
         cv2.rectangle(orig, (x, y), (x + w, y + h), (0, 0, 255), 2)
      rects = np.array([[x, y, x + w, y + h] for (x, y, w, h) in rects])
+     #applies non maxima suppression on rectangles with 65% overlap or more
      pick = non_max_suppression(rects, probs=None, overlapThresh=0.65)
      for (xA, yA, xB, yB) in pick:
         par+=1
@@ -263,11 +275,8 @@ def initDist(frame,width,height):
      else:
         msg=rospy.wait_for_message("/ardrone/image_raw", imageX)
         frame = ros_numpy.numpify(msg)
-
-
-    #cv2.imshow("Before NMS", orig)
-    #cv2.imshow("After NMS", image)
-    return (float)(xB-xA)/width, (float)(yB-yA)
+    #returns height and width
+    return (float)(xB-xA), (float)(yB-yA)
 
 def saveImg():
     msg=rospy.wait_for_message("/ardrone/image_raw", imageX)
